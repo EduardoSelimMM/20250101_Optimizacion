@@ -1,0 +1,1003 @@
+---
+title: "Sesion 10"
+author: "Eduardo Martínez"
+date: "2025-09-06"
+output:
+  html_document: default
+---
+
+```{r}
+packages <- c("ggplot2",
+              "scales",
+              "rsample",
+              "dplyr",
+              "purrr",
+              "rpart",
+              "rpart.plot",
+              "ipred",
+              "caret",
+              "randomForest",
+              "neuralnet",
+              "gbm",
+              "Metrics",
+              "AmesHousing")
+
+# Se instalan los paquetes que no se han instalado
+installed_packages <- packages %in% rownames(installed.packages())
+if(any(installed_packages == FALSE)){
+  install.packages(packages[!installed_packages])
+}
+```
+
+```{r message=FALSE, warning=FALSE}
+# Se mandan llamar las librerías que se usarán #library(package)
+invisible(lapply(packages, library, character.only = TRUE))
+rm(list = c("packages", "installed_packages"))
+```
+
+# Los datos con los que trabajaremos
+
+```
+help(ames_raw)
+```
+
+```{r}
+set.seed(123456)
+datos <- AmesHousing::make_ames()
+datos |> head()
+```
+
+```{r}
+set.seed(28032005)
+split_datos <- rsample::initial_split(datos, prop = .7)
+datos_train <- rsample::training(split_datos)
+datos_test  <- rsample::testing(split_datos)
+```
+
+# Modelos de un solo árbol
+
+# Primer modelo
+
+```{r}
+modelo1 <- rpart(formula = Sale_Price ~ ., data = datos_train, method  = "anova")
+```
+
+```{r}
+modelo1 |> rpart.plot()
+```
+
+```{r}
+modelo1 |> plotcp()
+```
+
+## Segundo modelo
+
+```{r}
+modelo2 <- rpart(formula = Sale_Price ~ ., data = datos_train, method  = "anova",
+                 control = list(cp = 0, xval = 10))
+```
+
+```{r}
+modelo2 |> rpart.plot()
+```
+
+```{r}
+modelo2 |> plotcp()
+abline(v = 12, lty = "dashed")
+```
+
+## Tercer modelo
+
+```{r}
+modelo3 <- rpart(formula = Sale_Price ~ ., data = datos_train, method  = "anova",
+                 control = list(minsplit = 10, maxdepth = 12, xval = 10))
+```
+
+```{r}
+modelo3 |> rpart.plot()
+```
+
+```{r}
+modelo3 |> plotcp()
+```
+
+## Métricas de los tres modelos
+
+```{r}
+# Modelo 1
+pred_train_modelo1 <- predict(modelo1, newdata = datos_train)
+error_cuadmed_train_modelo_1 <- RMSE(pred = pred_train_modelo1,
+                                     obs = datos_train$Sale_Price)
+
+pred_test_modelo1 <- predict(modelo1, newdata = datos_test)
+error_cuadmed_test_modelo_1 <- RMSE(pred = pred_test_modelo1,
+                                    obs = datos_test$Sale_Price)
+
+# Modelo 2
+pred_train_modelo2 <- predict(modelo2, newdata = datos_train)
+error_cuadmed_train_modelo_2 <- RMSE(pred = pred_train_modelo2,
+                                     obs = datos_train$Sale_Price)
+
+pred_test_modelo2 <- predict(modelo2, newdata = datos_test)
+error_cuadmed_test_modelo_2 <- RMSE(pred = pred_test_modelo2,
+                                    obs = datos_test$Sale_Price)
+
+# Modelo 3
+pred_train_modelo3 <- predict(modelo3, newdata = datos_train)
+error_cuadmed_train_modelo_3 <- RMSE(pred = pred_train_modelo3,
+                                     obs = datos_train$Sale_Price)
+
+pred_test_modelo3 <- predict(modelo3, newdata = datos_test)
+error_cuadmed_test_modelo_3 <- RMSE(pred = pred_test_modelo3,
+                                    obs = datos_test$Sale_Price)
+```
+
+```{r}
+error_cuadmed_train_modelo_1
+error_cuadmed_test_modelo_1
+error_cuadmed_train_modelo_2
+error_cuadmed_test_modelo_2
+error_cuadmed_train_modelo_3
+error_cuadmed_test_modelo_3
+```
+
+## Selección de hiperparámetros
+
+```{r}
+grid_hiperparametros <- expand.grid(
+  minsplit = 5:20,
+  maxdepth = 8:15
+)
+grid_hiperparametros |> head()
+```
+
+```{r}
+nrow(grid_hiperparametros)
+```
+
+```{r}
+modelos <- list()
+
+for (i in 1:nrow(grid_hiperparametros)) {
+  
+  minsplit <- grid_hiperparametros$minsplit[i]
+  maxdepth <- grid_hiperparametros$maxdepth[i]
+
+  modelos[[i]] <- rpart(
+    formula = Sale_Price ~ .,
+    data    = datos_train,
+    method  = "anova",
+    control = list(minsplit = minsplit, maxdepth = maxdepth)
+    )
+}
+```
+
+```{r}
+modelos |> class()
+```
+
+```{r}
+modelos[[25]] |> rpart.plot()
+```
+
+```{r}
+modelos[[88]] |> rpart.plot()
+```
+
+```{r}
+mejor_cp <- function(x){
+  min <- which.min(x$cptable[, "xerror"])
+  cp <- x$cptable[min, "CP"]
+  return(cp)
+}
+
+menor_error <- function(x) {
+  min <- which.min(x$cptable[, "xerror"])
+  xerror <- x$cptable[min, "xerror"]
+  return(xerror)
+}
+```
+
+```{r}
+resumen_modelos <- grid_hiperparametros |> dplyr::mutate(
+  cp = purrr::map_dbl(modelos, mejor_cp),
+  error = purrr::map_dbl(modelos, menor_error))
+```
+
+```{r}
+resumen_modelos |> head()
+```
+
+```{r}
+resumen_modelos |> dplyr::arrange(error) |> head()
+```
+
+```{r}
+resumen_modelos |> dplyr::arrange(cp) |> head()
+```
+
+```{r}
+resumen_mejor_modelo <- resumen_modelos |> dplyr::arrange(error) |> head(n=1)
+resumen_mejor_modelo
+```
+
+```{r}
+resumen_mejor_modelo$minsplit
+```
+
+
+```{r}
+mejor_modelo_arbol <- rpart(formula = Sale_Price ~ ., data = datos_train,
+                            method  = "anova",
+                            control = list(minsplit = resumen_mejor_modelo$minsplit,
+                                           maxdepth = resumen_mejor_modelo$maxdepth,
+                                           cp = resumen_mejor_modelo$cp))
+```
+
+```{r}
+mejor_modelo_arbol |> rpart.plot()
+```
+
+```{r}
+# Mejor Modelo Arbol
+pred_train_modelo_mejor <- predict(mejor_modelo_arbol, newdata = datos_train)
+error_cuadmed_train_modelo_mejor <- RMSE(pred = pred_train_modelo_mejor,
+                                         obs = datos_train$Sale_Price)
+
+pred_test_modelo_mejor <- predict(mejor_modelo_arbol, newdata = datos_test)
+error_cuadmed_test_modelo_mejor <- RMSE(pred = pred_test_modelo_mejor,
+                                        obs = datos_test$Sale_Price)
+```
+
+```{r}
+error_cuadmed_train_modelo_mejor
+error_cuadmed_test_modelo_mejor
+```
+
+```{r}
+error_cuadmed_train_modelo_1
+error_cuadmed_test_modelo_1
+error_cuadmed_train_modelo_2
+error_cuadmed_test_modelo_2
+error_cuadmed_train_modelo_3
+error_cuadmed_test_modelo_3
+```
+
+# Bagging
+
+```{r}
+set.seed(98765)
+modelo_bagged1 <- ipred::bagging(formula = Sale_Price ~ ., data = datos_train,
+                                 nbagg = 30, coob = TRUE)
+```
+
+```{r}
+modelo_bagged1 |> summary()
+```
+
+```{r}
+modelo_bagged1
+```
+```{r}
+# Modelo 1
+error_modelo1 <- modelo_bagged1$err
+
+pred_train_modelo_bagged1 <- predict(modelo_bagged1, newdata = datos_train)
+error_cuadmed_train_modelo_bagged1 <- RMSE(pred = pred_train_modelo_bagged1,
+                                           obs = datos_train$Sale_Price)
+
+pred_test_modelo_bagged1 <- predict(modelo_bagged1, newdata = datos_test)
+error_cuadmed_test_modelo_bagged1 <- RMSE(pred = pred_test_modelo_bagged1,
+                                          obs = datos_test$Sale_Price)
+```
+
+```{r}
+error_modelo1
+error_cuadmed_train_modelo_bagged1
+error_cuadmed_test_modelo_bagged1
+```
+## Segundo modelo bagging
+
+```{r}
+set.seed(98765)
+modelo_bagged2 <- ipred::bagging(formula = Sale_Price ~ ., data = datos_train,
+                                 nbagg = 50, coob = TRUE)
+```
+
+```{r}
+modelo_bagged2 |> summary()
+```
+
+```{r}
+modelo_bagged2
+```
+
+```{r}
+# Modelo 2
+error_modelo2 <- modelo_bagged2$err
+
+pred_train_modelo_bagged2 <- predict(modelo_bagged2, newdata = datos_train)
+error_cuadmed_train_modelo_bagged2 <- RMSE(pred = pred_train_modelo_bagged2,
+                                           obs = datos_train$Sale_Price)
+
+pred_test_modelo_bagged2 <- predict(modelo_bagged2, newdata = datos_test)
+error_cuadmed_test_modelo_bagged2 <- RMSE(pred = pred_test_modelo_bagged2,
+                                          obs = datos_test$Sale_Price)
+```
+
+```{r}
+error_modelo2
+error_cuadmed_train_modelo_bagged2
+error_cuadmed_test_modelo_bagged2
+```
+
+```{r}
+error_modelo1
+error_cuadmed_train_modelo_bagged1
+error_cuadmed_test_modelo_bagged1
+```
+
+## Selección de hiperparámetros
+
+```{r}
+num_arboles <- 10:60
+
+nombres_modelos <- c()
+errores_oob <- c()
+
+for (i in seq_along(num_arboles)) {
+  set.seed(98765)
+
+  modelo <- bagging(formula = Sale_Price ~ ., data = datos_train,
+                   coob = TRUE, nbagg   = num_arboles[i])
+  nombre_modelo <- i
+  error_oob <- modelo$err
+  nombres_modelos <-c(nombres_modelos, nombre_modelo)
+  errores_oob <- c(errores_oob, error_oob)
+}
+```
+
+```{r}
+df_modelos <- data.frame(modelo = nombres_modelos,
+                         err_oob = errores_oob)
+
+df_modelos |> head()
+```
+
+```{r}
+df_modelos |> arrange(err_oob) |> head()
+```
+
+```{r}
+df_modelos |> ggplot() +
+  geom_line(aes(x = modelo, y = err_oob)) +
+  scale_x_continuous(breaks = scales::pretty_breaks()) +
+  theme_light()
+```
+
+
+```{r}
+df_mejor_modelo <- df_modelos |> arrange(err_oob) |> head(n=1)
+df_mejor_modelo
+```
+
+```{r}
+df_mejor_modelo$modelo
+```
+
+```{r}
+set.seed(98765)
+modelo_bagged_mejor <- ipred::bagging(formula = Sale_Price ~ ., data = datos_train,
+                                      nbagg = df_mejor_modelo$modelo, coob = TRUE)
+```
+
+```{r}
+modelo_bagged_mejor
+```
+
+```{r}
+# Mejor Modelo Bagged
+error_modelo_mejor <- modelo_bagged_mejor$err
+
+pred_train_modelo_mejor <- predict(modelo_bagged_mejor, newdata = datos_train)
+error_cuadmed_train_modelo_mejor <- RMSE(pred = pred_train_modelo_mejor,
+                                         obs = datos_train$Sale_Price)
+
+pred_test_modelo_mejor <- predict(modelo_bagged_mejor, newdata = datos_test)
+error_cuadmed_test_modelo_mejor <- RMSE(pred = pred_test_modelo_mejor,
+                                        obs = datos_test$Sale_Price)
+```
+
+```{r}
+error_modelo_mejor
+error_cuadmed_train_modelo_mejor
+error_cuadmed_test_modelo_mejor
+```
+
+```{r}
+error_modelo1
+error_cuadmed_train_modelo_bagged1
+error_cuadmed_test_modelo_bagged1
+error_modelo2
+error_cuadmed_train_modelo_bagged2
+error_cuadmed_test_modelo_bagged2
+```
+
+
+```{r}
+# Parametros de control
+ctrl <- caret::trainControl(method = "cv",  number = 10) 
+
+set.seed(98765)
+# Modelo bagged
+modelo_bagged <- train(Sale_Price ~ ., data = datos_train,
+                       method = "treebag",
+                       trControl = ctrl,
+                       ntree = df_mejor_modelo$modelo,
+                       importance = TRUE)
+```
+
+```{r}
+modelo_bagged
+```
+
+```{r}
+plot(varImp(modelo_bagged), 20)  
+```
+
+# Random Forest
+
+# Modelo 1
+
+```{r}
+set.seed(98765)
+
+modelo_rf <- randomForest(Sale_Price ~ ., data = datos_train,
+                          ntree = 10, mtry = 3, #maxnodes = 10
+                          importance = TRUE, na.action = na.omit,
+                          keep.forest=FALSE)
+```
+
+```{r}
+modelo_rf
+```
+
+```{r}
+plot(modelo_rf)
+```
+
+
+```{r}
+modelo_rf |> varImpPlot(sort=T, n.var= 12, pch=16)
+```
+
+
+```{r}
+# Modelo Random Forest 1
+error_cuadmed_train_modelo_rf1 <- (datos_train$Sale_Price - modelo_rf$predicted)^2 |>
+  mean(na.rm = TRUE) |> sqrt()
+error_modelo_rf1 <- modelo_rf$mse |> mean() |> sqrt()
+```
+
+```{r}
+error_cuadmed_train_modelo_rf1
+error_modelo_rf1
+```
+## Modelo 2
+
+```{r}
+set.seed(98765)
+
+modelo_rf2 <- randomForest(Sale_Price ~ ., data = datos_train,
+                          ntree = 10, mtry = 50, #maxnodes = 10
+                          importance = TRUE, na.action = na.omit,
+                          keep.forest=FALSE)
+```
+
+```{r}
+modelo_rf2
+```
+
+```{r}
+plot(modelo_rf2)
+```
+
+
+```{r}
+modelo_rf2 |> varImpPlot(sort=T, n.var= 12, pch=16)
+```
+
+
+```{r}
+# Modelo Random Forest 2
+error_cuadmed_train_modelo_rf2 <- (datos_train$Sale_Price - modelo_rf2$predicted)^2 |>
+  mean(na.rm = TRUE) |> sqrt()
+error_modelo_rf2 <- modelo_rf2$mse |> mean() |> sqrt()
+```
+
+```{r}
+error_cuadmed_train_modelo_rf2
+error_modelo_rf2
+```
+
+```{r}
+error_cuadmed_train_modelo_rf1
+error_modelo_rf1
+```
+## Tercer modelo
+
+```{r}
+set.seed(98765)
+
+modelo_rf3 <- randomForest(Sale_Price ~ ., data = datos_train,
+                          ntree = 10, mtry = ceiling(sqrt(ncol(datos_train)-1)),
+                          importance = TRUE, na.action = na.omit,
+                          keep.forest=FALSE)
+```
+
+```{r}
+modelo_rf3
+```
+
+```{r}
+plot(modelo_rf3)
+```
+
+```{r}
+modelo_rf3 |> varImpPlot(sort=T, n.var= 12, pch=16)
+```
+
+
+```{r}
+# Modelo Random Forest 3
+error_cuadmed_train_modelo_rf3 <- (datos_train$Sale_Price - modelo_rf3$predicted)^2 |>
+  mean(na.rm = TRUE) |> sqrt()
+error_modelo_rf3 <- modelo_rf3$mse |> mean() |> sqrt()
+```
+
+```{r}
+error_cuadmed_train_modelo_rf3
+error_modelo_rf3
+```
+
+```{r}
+error_cuadmed_train_modelo_rf1
+error_modelo_rf1
+error_cuadmed_train_modelo_rf2
+error_modelo_rf2
+```
+## Selección de hiperparámetros
+
+```{r}
+grid_hiperparametros <- expand.grid(
+  ntree = c(10, 20, 30, 40, 50),
+  mtry = 3:10
+)
+grid_hiperparametros |> head()
+```
+
+```{r}
+nrow(grid_hiperparametros)
+```
+```{r}
+modelos <- list()
+df_metricas_modelos <- data.frame()
+
+for (i in 1:nrow(grid_hiperparametros)) {
+  
+  ntree <- grid_hiperparametros$ntree[i]
+  mtry <- grid_hiperparametros$mtry[i]
+  
+  set.seed(98765)
+  modelos[[i]] <- randomForest(Sale_Price ~ ., data = datos_train,
+                               ntree = ntree, mtry = mtry,
+                               importance = TRUE, na.action = na.omit,
+                               keep.forest = FALSE)
+  error_modelo <- modelos[[i]]$mse |> mean() |> sqrt()
+  renglon_metrica <- data.frame(modelo = i,
+                                num_arboles = ntree,
+                                variab = mtry,
+                                error = error_modelo)
+  df_metricas_modelos <- rbind(df_metricas_modelos, renglon_metrica)
+}
+```
+
+```{r}
+df_metricas_modelos |> head()
+```
+
+## Actividad para estudiantes
+
++ Reentrenar sólo el mejor modelo
++ Calcular los errores cuadráticos medios
+
+# Boosting
+
+```{r}
+# Parametros de control
+ctrl <- caret::trainControl(method = "repeatedcv", number = 3, repeats = 2) 
+
+set.seed(98765)
+# Modelo boosted
+modelo_boosted <- train(Sale_Price ~ ., data = datos_train,
+                       method = "gbm", # Stochastic Gradient Boosting
+                       trControl = ctrl,
+                       verbose = FALSE)
+```
+
+```{r}
+modelo_boosted
+```
+
+# Redes neuronales: Ejemplo de juguete
+
+```{r}
+# Generaremos datos simulados
+set.seed(02092025)
+datos <- data.frame(
+  x1 = rnorm(100),
+  x2 = rnorm(100),
+  clase = factor(sample(0:1, 100, replace = TRUE))
+)
+```
+
+```{r}
+datos |> head()
+```
+
+```{r}
+datos |> ggplot() +
+  geom_point(aes(x = x1, y = x2, color = clase)) +
+  theme_light()
+```
+
+
+```{r}
+set.seed(02092025)
+split_datos <- rsample::initial_split(datos, prop = .7)
+datos_train <- rsample::training(split_datos)
+datos_test  <- rsample::testing(split_datos)
+```
+
+```{r}
+# Se define y entrena la red neuronal
+modelo_red_neuronal <- neuralnet(clase ~ x1 + x2, data = datos_train,
+                                 hidden = 5)
+```
+
+```{r}
+modelo_red_neuronal |> class()
+```
+
+```{r}
+plot(modelo_red_neuronal, rep="best")
+```
+
+
+# Los datos con los que trabajaremos
+
+```
+help(ames_raw)
+```
+
+```{r}
+set.seed(123456)
+datos <- AmesHousing::make_ames()
+datos |> head()
+```
+
+```{r}
+datos_modelo <- datos |> dplyr::select(Sale_Price, Wood_Deck_SF,
+                                       Open_Porch_SF, Garage_Area)
+
+datos_modelo |> head()
+```
+
+```{r}
+preproc <- preProcess(datos_modelo, method=c("range"))
+datos_modelo <- predict(preproc, datos_modelo)
+```
+
+```{r}
+head(datos_modelo)
+```
+
+
+```{r}
+set.seed(02092025)
+split_datos <- rsample::initial_split(datos_modelo, prop = .7)
+datos_train <- rsample::training(split_datos)
+datos_test  <- rsample::testing(split_datos)
+```
+
+## Primer modelo
+
+```{r}
+modelo_rn <- neuralnet(Sale_Price ~ Wood_Deck_SF + Open_Porch_SF + Garage_Area,
+                       data = datos_train,
+                       hidden = 3,
+                       linear.output = TRUE)
+```
+
+```{r}
+modelo_rn |> class()
+```
+
+```{r}
+modelo_rn$result.matrix
+```
+
+```{r}
+plot(modelo_rn, rep="best")
+```
+
+```{r}
+datos_train <- datos_train |> dplyr::mutate(prediccion = modelo_rn$response)
+predicciones_rn <- predict(modelo_rn, newdata = datos_test)
+datos_test <- datos_test |> dplyr::mutate(prediccion = predicciones_rn)
+```
+
+```{r}
+datos_test |> head()
+```
+
+```{r}
+datos_test |> head()
+```
+
+```{r}
+datos_train |> ggplot() +
+  geom_point(aes(x = Sale_Price, y = prediccion)) +
+  theme_light()
+```
+
+```{r}
+datos_test |> ggplot() +
+  geom_point(aes(x = Sale_Price, y = prediccion)) +
+  theme_light()
+```
+
+## Otra aquitectura
+
+```{r}
+modelo_rn <- neuralnet(Sale_Price ~ Wood_Deck_SF + Open_Porch_SF + Garage_Area,
+                       data = datos_train,
+                       hidden = c(2,1))
+```
+
+```{r}
+plot(modelo_rn, rep="best")
+```
+
+```{r}
+datos_train <- datos_train |> dplyr::mutate(prediccion = modelo_rn$response)
+predicciones_rn <- predict(modelo_rn, newdata = datos_test)
+datos_test <- datos_test |> dplyr::mutate(prediccion = predicciones_rn)
+```
+
+```{r}
+datos_train |> ggplot() +
+  geom_point(aes(x = Sale_Price, y = prediccion)) +
+  theme_light()
+```
+
+```{r}
+datos_test |> ggplot() +
+  geom_point(aes(x = Sale_Price, y = prediccion)) +
+  theme_light()
+```
+
+## Otra aquitectura
+
+```{r}
+modelo_rn <- neuralnet(Sale_Price ~ Wood_Deck_SF + Open_Porch_SF + Garage_Area,
+                       data = datos_train,
+                       hidden = c(2,2))
+```
+
+```{r}
+plot(modelo_rn, rep="best")
+```
+
+```{r}
+datos_train <- datos_train |> dplyr::mutate(prediccion = modelo_rn$response)
+predicciones_rn <- predict(modelo_rn, newdata = datos_test)
+datos_test <- datos_test |> dplyr::mutate(prediccion = predicciones_rn)
+```
+
+```{r}
+datos_train |> ggplot() +
+  geom_point(aes(x = Sale_Price, y = prediccion)) +
+  theme_light()
+```
+
+```{r}
+datos_test |> ggplot() +
+  geom_point(aes(x = Sale_Price, y = prediccion)) +
+  theme_light()
+```
+
+
+## Un centavo de muestreo...
+
++ En general, una muestra es un subconjunto de una población de interés.
+
++ Formalmente, cada que consultamos un dataset es una muestra de la población de interés
+
++ Aunque generalmente, tomamos a dicho dataset como la población completa
+
++ La intención de lo que sigue es ver cómo se obtienen algunas muestras (de diferentes tipos)
+
++ Usaremos la función sample() y modificaciones de ésta
+
+### Muestreo aleatorio simple
+
++ Se puede pensar en este como ir sacando pelotitas de una urna y las que sacamos precisamente son nuestra muestra
+
++ Cada una de las pelotitas tiene la misma probabilidad de ser sacada
+
+```{r}
+IDs <- 18:75 # vector numérico que va del 18 al 75
+# Quiero obtener una muestra aleatoria de tamaño 10 de este vector
+muestra_aleatoria <- sample(x = IDs, size = 10)
+muestra_aleatoria
+```
+
++ Cada que yo ejecuto esta sentencia, voy a obtener una muestra diferente
+
+```{r}
+muestra_aleatoria <- sample(x = IDs, size = 10)
+muestra_aleatoria
+```
++ Otra
+
+```{r}
+muestra_aleatoria <- sample(x = IDs, size = 10)
+muestra_aleatoria
+```
+
++ Si yo quisiera que todos tuvieramos la misma muestra tendría que agregar que todos partimos de la misma semilla "aleatoria"
+
+```{r}
+set.seed(123456)
+muestra_aleatoria <- sample(x = IDs, size = 10)
+muestra_aleatoria
+```
+
++ Esto hace que sea totalmente reproducible nuestro código
+
+### Muestreo con reemplazo
+
++ En éste se piensa también como una urna con pelotitas, pero en este casa, se saca una pelotita, se observa su etiqueta y se devuelve a la urna
+
++ Cada pelotita tiene la misma probabilidad de ser seleccionada
+
++ Solamente hay que agregarle el parámetro replace = TRUE (i.e. un muestreo con reemplazo)
+
+```{r}
+tipo_escritura <- c("zurdo", "diestro", "ambos")
+muestra_con_reemplazo <- sample(x = tipo_escritura, size = 10, replace = TRUE)
+muestra_con_reemplazo
+```
++ CAda que ejecuto esta sentencia la muestra cambia
+
+```{r}
+muestra_con_reemplazo <- sample(x = tipo_escritura, size = 10, replace = TRUE)
+muestra_con_reemplazo
+```
+
++ Si queremos tener todos la misma muestra
+
+```{r}
+set.seed(12345)
+muestra_con_reemplazo <- sample(x = tipo_escritura, size = 10, replace = TRUE)
+muestra_con_reemplazo
+```
+
+### Muestreo con ponderaciones
+
++ Hay algunas veces, que sabemos a priori que hay una (o algunas) pelotita(s) que debiese(n) tener mayor probabilidad de ser sacada(s),
+
++ Voy a agregar el parámetro prob con las probabilidades de que cada pelotita sea sacada
+
+```{r}
+tipo_escritura <- c("zurdo", "diestro", "ambos")
+ponderaciones <- c(0.2, 0.7, 0.1)
+muestra_ponderada <- sample(tipo_escritura, size = 2, prob = ponderaciones)
+muestra_ponderada
+```
++ Si la quiero con reemplazo
+
+```{r}
+muestra_ponderada <- sample(tipo_escritura, size = 8, prob = ponderaciones, replace = TRUE)
+muestra_ponderada
+```
+
++ Empíricamente, me tendrían que salir aprox 20% de zurdos, 70% de diestros y 10% ambos
+
+
+```{r}
+tipo_escritura <- c("zurdo", "diestro", "ambos")
+ponderaciones <- c(0.2, 0.7, 0.1)
+muestra_ponderada <- sample(tipo_escritura, size = 10000, prob = ponderaciones, replace = TRUE)
+muestra_ponderada |> table() # contar cuántas veces me salió cada tipo de escritura
+```
+
++ Se puede hacer en un dataframe con la librería `dplyr`
+
+```{r}
+tibble(IDs = 18:75) |>
+  group_by(IDs) |>
+  dplyr::mutate(escritura = sample(tipo_escritura, size = 1, prob = ponderaciones)) |>
+  ungroup()
+```
+
+```{r}
+set.seed(12345678)
+tibble(IDs = 18:75) |>
+  group_by(IDs) |>
+  dplyr::mutate(escritura = sample(tipo_escritura, size = 1, prob = ponderaciones)) |>
+  ungroup()
+```
+
+### Muestreo estratificado
+
++ En este caso tenemos una población que está segmentada en grupitos a.k.a estratos
+
++ Y en cada estrato queremos obtener una muestra
+
++ Para esto, vamos a ocupar la función by()
+
++ La función by() aplica una función a un subconjunto específico de un data frame basado en uno o más factores, i.e. aplica una función en grupitos
+
+```{r}
+datos <- data.frame(
+  grupo = c("1o", "1o", "1o", "1o", "2o", "2o", "2o", "3o", "3o"),
+  estudiante = c("Ariel", "Enrique", "Elena", "Fenando", "Julian",
+                 "Eugenia", "Rocio", "David", "Felipe"),
+  calificacion = c(85, 90, 78, 88, 92, 95, 75, 68, 100)
+)
+
+datos
+```
+
++ Para ver cómo opera la función by() calcularé la media de las calificaciones de cada uno de los grupos (la media de los de 1o, la media de los de 2o y la media de los de 3o.)
+
+```{r}
+calif_promedio <- by(data = datos$calificacion,
+                     INDICES = datos$grupo, # Indices es la variable que indica los grupitos
+                     FUN = mean) # la función que aplicaré en cada grupito
+calif_promedio
+```
+¿Qué tipo de objeto nos devuelve?
+
+```{r}
+calif_promedio |> str()
+```
+
++ Ahara sí usémosla para hacer muestreo estratificado
+
+```{r}
+by(data = datos$calificacion, # quiero sacar una muestra de las calificaciones
+   INDICES = datos$grupo, # la quiero para cada grupito
+   FUN = function(x) sample(x, size = 2) # quiero obtener una muestra de tamaño 2 de cada grupito
+    )
+```
++ Otra ejecución
+
+```{r}
+by(data = datos$calificacion,
+   INDICES = datos$grupo,
+   FUN = function(x) sample(x, size = 2)
+    ) |> unlist()
+```
+
++ Si quiero que a todos nos salga lo mismo
+
+```{r}
+set.seed(12345678)
+by(data = datos$calificacion,
+   INDICES = datos$grupo,
+   FUN = function(x) sample(x, size = 2)
+    ) |> unlist()
+```
